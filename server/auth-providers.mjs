@@ -3,6 +3,32 @@ import { randomUUID } from 'node:crypto';
 import { HttpError } from './errors.mjs';
 import { normalizeMobile } from './phone.mjs';
 
+export function normalizeFirebasePrivateKey(value) {
+  if (typeof value !== 'string') throw new TypeError('Firebase private key must be configured.');
+  let key = value.trim();
+  if ((key.startsWith('"') && key.endsWith('"')) || (key.startsWith("'") && key.endsWith("'"))) {
+    try { const decoded = JSON.parse(key); key = typeof decoded === 'string' ? decoded : key; }
+    catch { key = key.slice(1, -1); }
+  }
+  return key.replace(/\\+r\\+n/g, '\n').replace(/\\+n/g, '\n').replace(/\r\n/g, '\n').trim() + '\n';
+}
+
+function safeInitializationCode(error) {
+  const code = typeof error?.code === 'string' ? error.code : '';
+  return /^(?:(?:app|auth)\/[a-z-]+|ERR_[A-Z0-9_]+|ENOENT|EACCES)$/.test(code) ? code : 'unknown';
+}
+
+function privateKeyShape(value) {
+  if (typeof value !== 'string') return { present: false };
+  return {
+    present: true,
+    format: value.includes('-----BEGIN RSA PRIVATE KEY-----') ? 'pkcs1' : value.includes('-----BEGIN PRIVATE KEY-----') ? 'pkcs8' : 'unrecognized',
+    escapedNewlines: /\\+n/.test(value),
+    actualNewlines: value.includes('\n'),
+    wrappedInQuotes: /^["']/.test(value.trim()),
+  };
+}
+
 // This module never inspects unsigned token claims or implements a local OTP.
 // Tests inject provider functions into createApp; no environment flag enables a bypass.
 export function createAuthProviders({ env = process.env, fetchImpl = fetch } = {}) {
@@ -18,21 +44,36 @@ export function createAuthProviders({ env = process.env, fetchImpl = fetch } = {
       throw new HttpError(503, 'Google sign-in requires live Firebase verification.');
     }
     if (!firebaseAuth) firebaseAuth = (async () => {
+      let stage = 'load-admin-sdk';
+      let keyShape = { present: false };
       try {
         const [{ initializeApp, cert }, { getAuth }] = await Promise.all([
           import('firebase-admin/app'), import('firebase-admin/auth'),
         ]);
+        stage = 'load-credential';
         const account = explicitFirebase ? {
           projectId: env.FIREBASE_PROJECT_ID,
           clientEmail: env.FIREBASE_CLIENT_EMAIL,
-          privateKey: env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+          privateKey: env.FIREBASE_PRIVATE_KEY,
         } : JSON.parse(await readFile(credentialFile, 'utf8'));
+        const keyField = Object.hasOwn(account, 'private_key') ? 'private_key' : 'privateKey';
+        keyShape = privateKeyShape(account[keyField]);
+        stage = 'normalize-private-key';
+        account[keyField] = normalizeFirebasePrivateKey(account[keyField]);
+        stage = 'create-credential';
+        const credential = cert(account);
+        stage = 'initialize-admin-app';
         const app = initializeApp({
-          credential: cert(account),
+          credential,
           ...(env.FIREBASE_PROJECT_ID ? { projectId: env.FIREBASE_PROJECT_ID } : {}),
         }, `osudh24-${randomUUID()}`);
+        stage = 'create-auth-client';
         return getAuth(app);
-      } catch {
+      } catch (error) {
+        console.error('Firebase Admin initialization failed', {
+          stage, code: safeInitializationCode(error),
+          credentialSource: explicitFirebase ? 'environment' : 'file', privateKey: keyShape,
+        });
         firebaseAuth = undefined;
         throw new HttpError(503, 'Google sign-in is not configured correctly. Please contact the store owner.');
       }
