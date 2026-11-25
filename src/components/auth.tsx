@@ -45,6 +45,10 @@ export function AuthPanel({state, actions, busy, onSuccess, onContinue, mode = '
   const inProgress = useRef(false);
   const active = useRef(true);
   const widgetAbort = useRef<AbortController | null>(null);
+  const googleToken = useRef<(() => Promise<string>) | null>(null);
+  const [googlePrepared, setGooglePrepared] = useState(false);
+  const [googlePreparationError, setGooglePreparationError] = useState('');
+  const [googlePreparationAttempt, setGooglePreparationAttempt] = useState(0);
   const linking = mode === 'link';
   const linked = state.auth.user?.providers || [];
   const googleLinked = linking && linked.includes('google');
@@ -60,6 +64,25 @@ export function AuthPanel({state, actions, busy, onSuccess, onContinue, mode = '
     active.current = true;
     return () => {active.current = false; widgetAbort.current?.abort();};
   }, []);
+
+  useEffect(() => {
+    if (!googleReady || googleLinked) return;
+    let current = true;
+    googleToken.current = null;
+    setGooglePrepared(false);
+    setGooglePreparationError('');
+    void import('@/lib/firebase-auth')
+      .then(async module => {
+        await module.prepareGoogleSignIn();
+        if (!current || !active.current) return;
+        googleToken.current = module.googleIdToken;
+        setGooglePrepared(true);
+      })
+      .catch(() => {
+        if (current && active.current) setGooglePreparationError('Google sign-in could not be prepared. Check your connection and try again.');
+      });
+    return () => {current = false; googleToken.current = null;};
+  }, [googleReady, googleLinked, googlePreparationAttempt]);
 
   useEffect(() => {
     if (!challenge) return;
@@ -103,13 +126,11 @@ export function AuthPanel({state, actions, busy, onSuccess, onContinue, mode = '
   }
 
   function googleSignIn() {
-    if (!googleReady || googleLinked) return;
+    const getToken = googleToken.current;
+    if (!googleReady || googleLinked || !googlePrepared || !getToken) return;
     void run('google', async () => {
-      let googleIdToken: () => Promise<string>;
-      try {({googleIdToken} = await import('@/lib/firebase-auth'));}
-      catch {throw new Error('Google sign-in could not be loaded. Check your connection and try again.');}
       if (!active.current) return;
-      const token = await googleIdToken();
+      const token = await getToken();
       if (!active.current) return;
       await actions.signInWithGoogle(token, mode);
       if (active.current) onSuccess();
@@ -159,12 +180,14 @@ export function AuthPanel({state, actions, busy, onSuccess, onContinue, mode = '
       {error && <p className="form-message" role="alert">{error}</p>}
       {message && <p className="form-message" role="status">{message}</p>}
 
-      <button type="button" className="auth-google" disabled={disabled || !googleReady || googleLinked} onClick={googleSignIn}>
+      <button type="button" className="auth-google" disabled={disabled || !googleReady || googleLinked || !googlePrepared} onClick={googleSignIn}>
         <span className="auth-google-mark" aria-hidden="true">G</span>
-        {pending === 'google' ? 'Opening Google…' : googleLinked ? 'Google connected' : linking ? 'Connect Google' : 'Continue with Google'}
+        {pending === 'google' ? 'Opening Google…' : googleLinked ? 'Google connected' : googleReady && !googlePrepared && !googlePreparationError ? 'Preparing Google…' : linking ? 'Connect Google' : 'Continue with Google'}
         {googleLinked && <Check size={17} />}
       </button>
       {!googleReady && !googleLinked && <p className="auth-hint">Google sign-in is not configured yet.</p>}
+      {googleReady && !googleLinked && !googlePrepared && !googlePreparationError && <p className="auth-hint" role="status">Preparing secure Google sign-in…</p>}
+      {googlePreparationError && <><p className="form-message" role="alert">{googlePreparationError}</p><button type="button" className="secondary-action" disabled={disabled} onClick={() => setGooglePreparationAttempt(attempt => attempt + 1)}>Retry Google sign-in</button></>}
 
       <div className="auth-divider"><span>{linking ? 'Mobile number' : 'or use your mobile number'}</span></div>
       {mobileLinked ? (

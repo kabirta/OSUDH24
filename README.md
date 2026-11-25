@@ -110,7 +110,7 @@ Payments, fulfilment, pharmacist review, real doctor consultations and reminders
 
 ## Deploy on Vercel with Neon
 
-Import the repository into Vercel using the Vite preset and **Node.js 22.x**. `vercel.json` installs the pinned pnpm dependencies, runs `pnpm build`, serves `dist/`, and deploys `api/[...path].mjs` as a native Node function in Singapore (`sin1`). The function handles `/api/*` on the same origin as the website; Vite's development proxy is not used in production. Keep Neon near the function region.
+Import the repository into Vercel using the Vite preset and **Node.js 22.x**. `vercel.json` installs the pinned pnpm dependencies, runs `pnpm build`, serves `dist/`, and deploys `api/index.mjs` as a native Node function in Singapore (`sin1`). The function handles `/api/*` on the same origin as the website; Vite's development proxy is not used in production. Keep Neon near the function region.
 
 Create a Neon PostgreSQL database and configure these Vercel environment variables for the intended deployment environment:
 
@@ -190,7 +190,7 @@ PostgreSQL adapter and migration tests are opt-in: set `TEST_DATABASE_URL` to a 
 
 ## Code layout
 
-- `api/[...path].mjs`: native Vercel Node API entry point.
+- `api/index.mjs`: native Vercel Node API entry point.
 - `server/storage.mjs`: asynchronous SQLite/PostgreSQL adapter, transactions and snapshots.
 - `server/`: HTTP routes, schemas, deployment checks, seed catalogs and integration tests.
 - `scripts/dev.mjs`: starts/stops the API and Vite together.
