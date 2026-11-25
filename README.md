@@ -110,6 +110,8 @@ Payments, fulfilment, pharmacist review, real doctor consultations and reminders
 
 ## Deploy on Vercel with Neon
 
+Production: [osudh24-azure.vercel.app](https://osudh24-azure.vercel.app). Both the frontend and API run on Vercel; account data and private prescription bytes persist in Neon PostgreSQL.
+
 Import the repository into Vercel using the Vite preset and **Node.js 22.x**. `vercel.json` installs the pinned pnpm dependencies, runs `pnpm build`, serves `dist/`, and deploys `api/index.mjs` as a native Node function in Singapore (`sin1`). The function handles `/api/*` on the same origin as the website; Vite's development proxy is not used in production. Keep Neon near the function region.
 
 Create a Neon PostgreSQL database and configure these Vercel environment variables for the intended deployment environment:
@@ -122,6 +124,7 @@ Create a Neon PostgreSQL database and configure these Vercel environment variabl
 | `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY` | Server-only Admin credentials for the same Firebase project. Keep the private key's line breaks, or use literal `\n` escapes. A local service-account file path will not exist on Vercel. |
 | `VITE_MSG91_WIDGET_ID`, `VITE_MSG91_TOKEN_AUTH` | Public widget configuration, needed by the browser and the API's provider-readiness check. |
 | `MSG91_AUTH_KEY` | Server-only MSG91 credential for verifying widget access tokens. `MSG91_TEMPLATE_ID` is needed only for the older direct OTP fallback. |
+| `NODE_OPTIONS=--experimental-require-module` | Required on Vercel for Firebase Admin's ES module dependency. See [Vercel's Node.js module setting](https://vercel.com/docs/functions/runtimes/node-js/advanced-node-configuration#experimental-nodejs-require-of-es-module). |
 | `VERCEL_SUPPORT_LARGE_REQUEST_BODY=1` | Enables the larger request-body limit when the function prerequisites below are satisfied. |
 
 Keep database URLs and private provider credentials in Vercel's sensitive environment variables. Never prefix them with `VITE_`, put them in `vercel.json`, commit `.env`/service-account files, or include their values in logs. Redeploy after changing environment variables; `VITE_*` changes require a new frontend build. Use a separate Neon branch/database for Preview deployments so previews do not share production account data.
@@ -130,7 +133,7 @@ Add the final website hostname to Firebase Authentication's authorized domains. 
 
 ### Prescription size support
 
-The app accepts files up to **10 MiB**. Enable **Fluid Compute**, select **Performance (4 GB)** memory, and set `VERCEL_SUPPORT_LARGE_REQUEST_BODY=1` before deploying. The function is configured for 4096 MB and a 60-second maximum duration. Vercel's 20 MiB request-body beta requires a Pro or Enterprise plan; the default 4.5 MB cap cannot support the app's full upload allowance. Large downloads must also use streamed responses because the standard response limit remains 4.5 MB. See [Vercel function limits](https://vercel.com/docs/functions/limitations#request-body-size).
+The app accepts files up to **10 MiB**. Enable **Fluid Compute**, select **Performance (4 GB)** in the Vercel project settings, and set `VERCEL_SUPPORT_LARGE_REQUEST_BODY=1` before deploying. `vercel.json` sets a 60-second maximum duration; Fluid Compute memory is configured at project level. Vercel's 20 MiB request-body beta requires a Pro or Enterprise plan; the default 4.5 MB cap cannot support the app's full upload allowance. Downloads use streamed responses because the standard response limit remains 4.5 MB. See [Vercel function limits](https://vercel.com/docs/functions/limitations#request-body-size).
 
 After deployment, verify `/api/health`, `/api/bootstrap`, guest cart persistence, Secure/HttpOnly session cookies, and account sign-in/history after refresh. Live SMS verification requires the phone owner's participation.
 
